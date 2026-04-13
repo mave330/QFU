@@ -51,6 +51,22 @@ interface AirportInfo {
   elevation_ft: number;
 }
 
+interface MetarData {
+  raw: string;
+  wind_direction: number | null;
+  wind_speed: number | null;
+  wind_gust: number | null;
+  wind_unit: string;
+  visibility: string | null;
+  temperature: number | null;  // Can be float from API
+  dewpoint: number | null;  // Can be float from API
+  altimeter: number | null;
+  flight_category: string | null;
+  clouds: string | null;
+  weather: string | null;
+  expected_runway_from_wind: string | null;
+}
+
 interface RunwayAnalysisResponse {
   airport: AirportInfo;
   timestamp: string;
@@ -58,6 +74,7 @@ interface RunwayAnalysisResponse {
   total_landing_aircraft: number;
   all_aircraft_nearby: Aircraft[];
   message: string;
+  metar: MetarData | null;
 }
 
 export default function Index() {
@@ -177,6 +194,22 @@ export default function Index() {
     return directions[index];
   };
 
+  const getWindDirectionLabel = (deg: number | null) => {
+    if (deg === null) return '';
+    const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    return dirs[Math.round(deg / 22.5) % 16];
+  };
+
+  const getFlightCategoryColor = (cat: string | null) => {
+    switch (cat) {
+      case 'VFR': return '#4CAF50';
+      case 'MVFR': return '#2196F3';
+      case 'IFR': return '#FF9800';
+      case 'LIFR': return '#f44336';
+      default: return '#888';
+    }
+  };
+
   const renderTextView = () => (
     <ScrollView
       style={styles.resultContainer}
@@ -243,6 +276,73 @@ export default function Index() {
               )}
             </View>
           ))}
+        </View>
+      )}
+
+      {/* METAR Weather Card */}
+      {data!.metar && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Weather (METAR)</Text>
+          <View style={styles.weatherCard}>
+            {/* Wind Info - Main Feature */}
+            <View style={styles.windRow}>
+              <Ionicons name="navigate" size={28} color="#2196F3" style={data!.metar.wind_direction ? { transform: [{ rotate: `${data!.metar.wind_direction}deg` }] } : undefined} />
+              <View style={styles.windInfo}>
+                <Text style={styles.windMain}>
+                  {data!.metar.wind_direction !== null ? `${data!.metar.wind_direction}° (${getWindDirectionLabel(data!.metar.wind_direction)})` : 'Variable'} at {data!.metar.wind_speed ?? '?'} kt
+                  {data!.metar.wind_gust ? ` gusting ${data!.metar.wind_gust} kt` : ''}
+                </Text>
+                {data!.metar.expected_runway_from_wind && (
+                  <Text style={styles.windExpected}>
+                    Expected runway from wind: {data!.metar.expected_runway_from_wind}
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {/* Weather Details Grid */}
+            <View style={styles.weatherGrid}>
+              <View style={styles.weatherItem}>
+                <Ionicons name="eye-outline" size={16} color="#888" />
+                <Text style={styles.weatherLabel}>Visibility</Text>
+                <Text style={styles.weatherValue}>{data!.metar.visibility ?? 'N/A'}</Text>
+              </View>
+              <View style={styles.weatherItem}>
+                <Ionicons name="thermometer-outline" size={16} color="#888" />
+                <Text style={styles.weatherLabel}>Temp / Dew</Text>
+                <Text style={styles.weatherValue}>
+                  {data!.metar.temperature ?? '?'}° / {data!.metar.dewpoint ?? '?'}°C
+                </Text>
+              </View>
+              <View style={styles.weatherItem}>
+                <Ionicons name="cloudy-outline" size={16} color="#888" />
+                <Text style={styles.weatherLabel}>Clouds</Text>
+                <Text style={styles.weatherValue} numberOfLines={2}>{data!.metar.clouds ?? 'Clear'}</Text>
+              </View>
+              {data!.metar.flight_category && (
+                <View style={styles.weatherItem}>
+                  <Ionicons name="flag-outline" size={16} color={getFlightCategoryColor(data!.metar.flight_category)} />
+                  <Text style={styles.weatherLabel}>Category</Text>
+                  <Text style={[styles.weatherValue, { color: getFlightCategoryColor(data!.metar.flight_category) }]}>
+                    {data!.metar.flight_category}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Weather phenomena */}
+            {data!.metar.weather && (
+              <View style={styles.weatherPhenomena}>
+                <Ionicons name="rainy-outline" size={16} color="#FFC107" />
+                <Text style={styles.weatherPhenomenaText}>{data!.metar.weather}</Text>
+              </View>
+            )}
+
+            {/* Raw METAR */}
+            <View style={styles.rawMetar}>
+              <Text style={styles.rawMetarText} numberOfLines={3}>{data!.metar.raw}</Text>
+            </View>
+          </View>
         </View>
       )}
 
@@ -1021,5 +1121,78 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Weather / METAR styles
+  weatherCard: {
+    backgroundColor: '#1C2128',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#30363D',
+  },
+  windRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#30363D',
+  },
+  windInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  windMain: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  windExpected: {
+    color: '#2196F3',
+    fontSize: 13,
+    marginTop: 4,
+  },
+  weatherGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  weatherItem: {
+    width: '50%',
+    paddingVertical: 8,
+    paddingRight: 8,
+  },
+  weatherLabel: {
+    color: '#666',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  weatherValue: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  weatherPhenomena: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 193, 7, 0.1)',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 12,
+  },
+  weatherPhenomenaText: {
+    color: '#FFC107',
+    fontSize: 13,
+    marginLeft: 8,
+  },
+  rawMetar: {
+    marginTop: 12,
+    padding: 10,
+    backgroundColor: '#161B22',
+    borderRadius: 8,
+  },
+  rawMetarText: {
+    color: '#888',
+    fontSize: 11,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 });

@@ -1705,6 +1705,21 @@ class AirportInfo(BaseModel):
     lon: float
     elevation_ft: int
 
+class MetarData(BaseModel):
+    raw: str
+    wind_direction: Optional[int] = None
+    wind_speed: Optional[int] = None
+    wind_gust: Optional[int] = None
+    wind_unit: str = "kt"
+    visibility: Optional[str] = None
+    temperature: Optional[float] = None  # Changed from int to float
+    dewpoint: Optional[float] = None  # Changed from int to float
+    altimeter: Optional[float] = None
+    flight_category: Optional[str] = None
+    clouds: Optional[str] = None
+    weather: Optional[str] = None
+    expected_runway_from_wind: Optional[str] = None
+
 class RunwayAnalysisResponse(BaseModel):
     airport: AirportInfo
     timestamp: datetime
@@ -1712,6 +1727,7 @@ class RunwayAnalysisResponse(BaseModel):
     total_landing_aircraft: int
     all_aircraft_nearby: List[Aircraft]
     message: str
+    metar: Optional[MetarData] = None
 
 # ============================================
 # UTILITY FUNCTIONS
@@ -1864,7 +1880,93 @@ async def fetch_aircraft_from_opensky(lat: float, lon: float, radius_km: float =
             logger.error(f"Error fetching aircraft data: {e}")
             raise HTTPException(status_code=500, detail=f"Error fetching aircraft data: {str(e)}")
 
-def analyze_landing_aircraft(aircraft_list: List[dict], airport: dict, max_altitude_agl_ft: float = 1000) -> List[dict]:
+async def fetch_metar(icao: str) -> Optional[dict]:
+    """Fetch METAR weather data from aviationweather.gov"""
+    url = f"https://aviationweather.gov/api/data/metar?ids={icao}&format=json"
+    
+    async with httpx.AsyncClient(timeout=15.0) as http_client:
+        try:
+            response = await http_client.get(url, headers={"User-Agent": "FlightQFUTracker/1.0"})
+            if response.status_code == 204:
+                return None
+            response.raise_for_status()
+            data = response.json()
+            
+            if not data or len(data) == 0:
+                return None
+            
+            metar = data[0]
+            
+            # Parse wind direction and speed
+            wind_dir = metar.get("wdir")
+            wind_speed = metar.get("wspd")
+            wind_gust = metar.get("wgst")
+            
+            # Parse clouds
+            clouds_list = metar.get("clouds", [])
+            cloud_str = ""
+            if clouds_list:
+                cloud_parts = []
+                for c in clouds_list:
+                    cover = c.get("cover", "")
+                    base = c.get("base")
+                    if base:
+                        cloud_parts.append(f"{cover} {base}ft")
+                    else:
+                        cloud_parts.append(cover)
+                cloud_str = ", ".join(cloud_parts)
+            
+            # Parse visibility
+            visib = metar.get("visib")
+            vis_str = f"{visib} SM" if visib is not None else None
+            
+            # Flight category
+            flt_cat = metar.get("fltcat")
+            
+            # Raw METAR text
+            raw_text = metar.get("rawOb", "")
+            
+            return {
+                "raw": raw_text,
+                "wind_direction": int(wind_dir) if wind_dir is not None and str(wind_dir).isdigit() else None,
+                "wind_speed": int(wind_speed) if wind_speed is not None else None,
+                "wind_gust": int(wind_gust) if wind_gust is not None else None,
+                "wind_unit": "kt",
+                "visibility": vis_str,
+                "temperature": metar.get("temp"),
+                "dewpoint": metar.get("dewp"),
+                "altimeter": metar.get("altim"),
+                "flight_category": flt_cat,
+                "clouds": cloud_str if cloud_str else None,
+                "weather": metar.get("wxString"),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to fetch METAR for {icao}: {e}")
+            return None
+
+def get_expected_runway_from_wind(wind_direction: Optional[int], runways: List[dict]) -> Optional[str]:
+    """Determine expected landing runway based on wind direction (land INTO the wind)"""
+    if wind_direction is None:
+        return None
+    
+    # Aircraft land into the wind, so the runway heading should be close to wind direction
+    best_direction = None
+    best_diff = 180
+    
+    for runway in runways:
+        heading_keys = [k for k in runway.keys() if k.startswith("heading_")]
+        for key in heading_keys:
+            rwy_heading = runway[key]
+            diff = heading_difference(wind_direction, rwy_heading)
+            if diff < best_diff:
+                best_diff = diff
+                direction = get_runway_direction_from_heading(runway, wind_direction)
+                if direction:
+                    best_direction = direction
+    
+    return best_direction
+
+def analyze_landing_aircraft(aircraft_list: List[dict], airport: dict, max_altitude_agl_ft: float = 2000) -> List[dict]:
     """Filter aircraft that are likely landing"""
     landing_aircraft = []
     airport_elevation = airport.get("elevation_ft", 0)
@@ -1878,15 +1980,15 @@ def analyze_landing_aircraft(aircraft_list: List[dict], airport: dict, max_altit
         agl = ac["altitude_ft"] - airport_elevation
         
         # Criteria for landing aircraft:
-        # 1. Below 1000ft AGL (as specified by user)
+        # 1. Below 2000ft AGL
         # 2. Descending (negative vertical rate) OR very low and slow
         # 3. Has valid heading
-        # 4. Reasonable distance from airport (within 15km for final approach)
+        # 4. Reasonable distance from airport (within 20km for approach)
         
         is_low = agl > 0 and agl < max_altitude_agl_ft
         is_descending = ac.get("vertical_rate") is not None and ac["vertical_rate"] < 0
         has_heading = ac.get("heading") is not None
-        is_close = ac.get("distance_km", 100) < 15
+        is_close = ac.get("distance_km", 100) < 20
         is_slow = ac.get("velocity_knots") is not None and ac["velocity_knots"] < 200
         
         # Landing if: low altitude AND (descending OR very low and slow) AND has heading
@@ -1981,12 +2083,16 @@ async def get_runway_status(icao: str) -> RunwayAnalysisResponse:
     
     airport = AIRPORT_DATABASE[icao]
     
-    # Fetch aircraft from OpenSky
+    # Fetch aircraft and METAR in parallel
     logger.info(f"Fetching aircraft near {icao}...")
     all_aircraft = await fetch_aircraft_from_opensky(airport["lat"], airport["lon"], radius_km=30)
     logger.info(f"Found {len(all_aircraft)} aircraft near {icao}")
     
-    # Analyze landing aircraft
+    # Fetch METAR weather data
+    metar_data = await fetch_metar(icao)
+    logger.info(f"METAR for {icao}: {'found' if metar_data else 'not available'}")
+    
+    # Analyze landing aircraft (now with 2000ft AGL threshold)
     landing_aircraft = analyze_landing_aircraft(all_aircraft, airport)
     logger.info(f"Found {len(landing_aircraft)} landing aircraft")
     
@@ -2017,6 +2123,15 @@ async def get_runway_status(icao: str) -> RunwayAnalysisResponse:
     # Sort by aircraft count
     active_runways.sort(key=lambda x: x.aircraft_count, reverse=True)
     
+    # Build METAR response
+    metar_response = None
+    if metar_data:
+        expected_rwy = get_expected_runway_from_wind(metar_data.get("wind_direction"), airport["runways"])
+        metar_response = MetarData(
+            **metar_data,
+            expected_runway_from_wind=expected_rwy
+        )
+    
     # Build message
     if active_runways:
         directions = [f"{r.direction}" for r in active_runways]
@@ -2043,7 +2158,8 @@ async def get_runway_status(icao: str) -> RunwayAnalysisResponse:
         active_runways=active_runways,
         total_landing_aircraft=len(landing_aircraft),
         all_aircraft_nearby=[Aircraft(**ac) for ac in sorted(all_aircraft, key=lambda x: x.get("distance_km", 100))[:50]],
-        message=message
+        message=message,
+        metar=metar_response
     )
 
 @api_router.get("/search-airports/{query}")
