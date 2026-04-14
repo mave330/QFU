@@ -67,6 +67,13 @@ interface MetarData {
   expected_runway_from_wind: string | null;
 }
 
+interface RunwayDefinition {
+  name: string;
+  headings: Record<string, number>;
+  lat: number;
+  lon: number;
+}
+
 interface RunwayAnalysisResponse {
   airport: AirportInfo;
   timestamp: string;
@@ -75,6 +82,7 @@ interface RunwayAnalysisResponse {
   all_aircraft_nearby: Aircraft[];
   message: string;
   metar: MetarData | null;
+  all_runways: RunwayDefinition[];
 }
 
 export default function Index() {
@@ -230,6 +238,142 @@ export default function Index() {
           </View>
         </View>
       </View>
+
+      {/* Runway Diagram */}
+      {data!.all_runways && data!.all_runways.length > 0 && (() => {
+        const diagramSize = Math.min(width - 64, 300);
+        const center = diagramSize / 2;
+        const rwyLength = diagramSize * 0.6;
+        const activeDirections = data!.active_runways.map(r => r.runway_name);
+
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Runway Diagram</Text>
+            <View style={[styles.diagramContainer, { width: diagramSize, height: diagramSize }]}>
+              {/* Compass rose */}
+              <Text style={[styles.diagramCompass, { top: 6, left: center - 5 }]}>N</Text>
+              <Text style={[styles.diagramCompass, { bottom: 6, left: center - 4 }]}>S</Text>
+              <Text style={[styles.diagramCompass, { top: center - 8, right: 6 }]}>E</Text>
+              <Text style={[styles.diagramCompass, { top: center - 8, left: 6 }]}>W</Text>
+
+              {/* Runways */}
+              {data!.all_runways.map((rwy, idx) => {
+                // Get first heading to determine orientation
+                const headingKeys = Object.keys(rwy.headings);
+                const firstHeading = rwy.headings[headingKeys[0]] || 0;
+                // Convert heading to rotation angle (heading 0/360 = vertical/North)
+                const angleDeg = firstHeading - 90; // CSS rotation: 0 = right, so subtract 90
+                const angleRad = (firstHeading * Math.PI) / 180;
+
+                const isActive = activeDirections.includes(rwy.name);
+                const parts = rwy.name.split('/');
+
+                // Offset each runway slightly to avoid overlap
+                const totalRunways = data!.all_runways.length;
+                const spreadOffset = totalRunways > 1 ? ((idx - (totalRunways - 1) / 2) * 20) : 0;
+                const perpAngle = angleRad + Math.PI / 2;
+                const offsetX = Math.cos(perpAngle) * spreadOffset;
+                const offsetY = Math.sin(perpAngle) * spreadOffset;
+
+                // Runway line endpoints
+                const halfLen = rwyLength / 2;
+                const x1 = center + offsetX - Math.cos(angleRad) * halfLen;
+                const y1 = center + offsetY - Math.sin(angleRad) * halfLen;
+                const x2 = center + offsetX + Math.cos(angleRad) * halfLen;
+                const y2 = center + offsetY + Math.sin(angleRad) * halfLen;
+
+                // Label positions at each end
+                const labelOffset = 14;
+                const lx1 = x1 - Math.cos(angleRad) * labelOffset;
+                const ly1 = y1 - Math.sin(angleRad) * labelOffset;
+                const lx2 = x2 + Math.cos(angleRad) * labelOffset;
+                const ly2 = y2 + Math.sin(angleRad) * labelOffset;
+
+                return (
+                  <React.Fragment key={rwy.name}>
+                    {/* Runway strip */}
+                    <View
+                      style={[
+                        styles.diagramRunway,
+                        {
+                          width: rwyLength,
+                          left: center + offsetX - rwyLength / 2,
+                          top: center + offsetY - 3,
+                          transform: [{ rotate: `${angleDeg}deg` }],
+                          backgroundColor: isActive ? '#4CAF50' : '#555',
+                          borderColor: isActive ? '#66BB6A' : '#777',
+                        },
+                      ]}
+                    />
+                    {/* Centerline dashes */}
+                    <View
+                      style={[
+                        styles.diagramCenterline,
+                        {
+                          width: rwyLength - 16,
+                          left: center + offsetX - (rwyLength - 16) / 2,
+                          top: center + offsetY - 0.5,
+                          transform: [{ rotate: `${angleDeg}deg` }],
+                        },
+                      ]}
+                    />
+                    {/* Label end 1 */}
+                    <Text
+                      style={[
+                        styles.diagramLabel,
+                        { left: lx1 - 16, top: ly1 - 8 },
+                        isActive && styles.diagramLabelActive,
+                      ]}
+                    >
+                      {parts[0]}
+                    </Text>
+                    {/* Label end 2 */}
+                    <Text
+                      style={[
+                        styles.diagramLabel,
+                        { left: lx2 - 16, top: ly2 - 8 },
+                        isActive && styles.diagramLabelActive,
+                      ]}
+                    >
+                      {parts[1]}
+                    </Text>
+                  </React.Fragment>
+                );
+              })}
+
+              {/* Wind arrow if METAR available */}
+              {data!.metar && data!.metar.wind_direction !== null && (
+                <View style={[styles.diagramWindArrow, { top: 24, right: 24 }]}>
+                  <Ionicons
+                    name="arrow-down"
+                    size={20}
+                    color="#2196F3"
+                    style={{ transform: [{ rotate: `${data!.metar.wind_direction}deg` }] }}
+                  />
+                  <Text style={styles.diagramWindText}>{data!.metar.wind_speed}kt</Text>
+                </View>
+              )}
+            </View>
+            {/* Legend */}
+            <View style={styles.diagramLegend}>
+              <View style={styles.diagramLegendItem}>
+                <View style={[styles.diagramLegendDot, { backgroundColor: '#4CAF50' }]} />
+                <Text style={styles.diagramLegendText}>Active</Text>
+              </View>
+              <View style={styles.diagramLegendItem}>
+                <View style={[styles.diagramLegendDot, { backgroundColor: '#555' }]} />
+                <Text style={styles.diagramLegendText}>Inactive</Text>
+              </View>
+              {data!.metar && data!.metar.wind_direction !== null && (
+                <View style={styles.diagramLegendItem}>
+                  <Ionicons name="arrow-down" size={12} color="#2196F3" />
+                  <Text style={styles.diagramLegendText}>Wind</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        );
+      })()}
 
       {/* Status Message */}
       <View style={styles.messageCard}>
@@ -1121,6 +1265,86 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Runway Diagram styles
+  diagramContainer: {
+    backgroundColor: '#161B22',
+    borderRadius: 12,
+    alignSelf: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#30363D',
+  },
+  diagramCompass: {
+    position: 'absolute',
+    color: '#555',
+    fontSize: 11,
+    fontWeight: '600',
+    zIndex: 5,
+  },
+  diagramRunway: {
+    position: 'absolute',
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    zIndex: 2,
+  },
+  diagramCenterline: {
+    position: 'absolute',
+    height: 1,
+    zIndex: 3,
+    borderTopWidth: 1,
+    borderTopColor: '#fff',
+    borderStyle: 'dashed',
+    opacity: 0.4,
+  },
+  diagramLabel: {
+    position: 'absolute',
+    color: '#999',
+    fontSize: 10,
+    fontWeight: 'bold',
+    width: 32,
+    textAlign: 'center',
+    zIndex: 4,
+  },
+  diagramLabelActive: {
+    color: '#4CAF50',
+    fontSize: 11,
+  },
+  diagramWindArrow: {
+    position: 'absolute',
+    alignItems: 'center',
+    zIndex: 5,
+    backgroundColor: 'rgba(33, 150, 243, 0.15)',
+    borderRadius: 8,
+    padding: 4,
+  },
+  diagramWindText: {
+    color: '#2196F3',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  diagramLegend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  diagramLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 10,
+  },
+  diagramLegendDot: {
+    width: 10,
+    height: 4,
+    borderRadius: 2,
+    marginRight: 5,
+  },
+  diagramLegendText: {
+    color: '#888',
+    fontSize: 11,
   },
   // Weather / METAR styles
   weatherCard: {

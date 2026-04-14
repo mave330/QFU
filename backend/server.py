@@ -1720,6 +1720,12 @@ class MetarData(BaseModel):
     weather: Optional[str] = None
     expected_runway_from_wind: Optional[str] = None
 
+class RunwayDefinition(BaseModel):
+    name: str
+    headings: Dict[str, int]
+    lat: float
+    lon: float
+
 class RunwayAnalysisResponse(BaseModel):
     airport: AirportInfo
     timestamp: datetime
@@ -1728,6 +1734,7 @@ class RunwayAnalysisResponse(BaseModel):
     all_aircraft_nearby: List[Aircraft]
     message: str
     metar: Optional[MetarData] = None
+    all_runways: List[RunwayDefinition] = []
 
 # ============================================
 # UTILITY FUNCTIONS
@@ -2144,6 +2151,17 @@ async def get_runway_status(icao: str) -> RunwayAnalysisResponse:
         else:
             message = "No aircraft detected near the airport"
     
+    # Build all_runways list for diagram
+    all_runways_list = []
+    for rwy in airport["runways"]:
+        headings = {k: v for k, v in rwy.items() if k.startswith("heading_")}
+        all_runways_list.append(RunwayDefinition(
+            name=rwy["name"],
+            headings=headings,
+            lat=rwy.get("lat", airport["lat"]),
+            lon=rwy.get("lon", airport["lon"])
+        ))
+    
     return RunwayAnalysisResponse(
         airport=AirportInfo(
             icao=icao,
@@ -2159,7 +2177,8 @@ async def get_runway_status(icao: str) -> RunwayAnalysisResponse:
         total_landing_aircraft=len(landing_aircraft),
         all_aircraft_nearby=[Aircraft(**ac) for ac in sorted(all_aircraft, key=lambda x: x.get("distance_km", 100))[:50]],
         message=message,
-        metar=metar_response
+        metar=metar_response,
+        all_runways=all_runways_list
     )
 
 @api_router.get("/search-airports/{query}")
