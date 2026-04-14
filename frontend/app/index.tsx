@@ -243,8 +243,28 @@ export default function Index() {
       {data!.all_runways && data!.all_runways.length > 0 && (() => {
         const diagramSize = Math.min(width - 64, 300);
         const center = diagramSize / 2;
-        const rwyLength = diagramSize * 0.6;
+        const rwyLength = diagramSize * 0.55;
         const activeDirections = data!.active_runways.map(r => r.runway_name);
+
+        // Calculate geographic bounds of all runways to scale positions
+        const airportLat = data!.airport.lat;
+        const airportLon = data!.airport.lon;
+        const cosLat = Math.cos((airportLat * Math.PI) / 180);
+
+        // Get position offsets in km for each runway
+        const rwyPositions = data!.all_runways.map(rwy => ({
+          ...rwy,
+          dxKm: (rwy.lon - airportLon) * 111 * cosLat,
+          dyKm: (rwy.lat - airportLat) * 111,
+        }));
+
+        // Find max extent to scale
+        const maxExtent = Math.max(
+          ...rwyPositions.map(r => Math.abs(r.dxKm)),
+          ...rwyPositions.map(r => Math.abs(r.dyKm)),
+          0.5
+        );
+        const scale = (diagramSize * 0.3) / maxExtent; // Scale so runways fit in ~60% of diagram
 
         return (
           <View style={styles.section}>
@@ -257,37 +277,26 @@ export default function Index() {
               <Text style={[styles.diagramCompass, { top: center - 8, left: 6 }]}>W</Text>
 
               {/* Runways */}
-              {data!.all_runways.map((rwy, idx) => {
-                // Get first heading to determine orientation
+              {rwyPositions.map((rwy, idx) => {
                 const headingKeys = Object.keys(rwy.headings);
                 const firstHeading = rwy.headings[headingKeys[0]] || 0;
-                // Convert heading to rotation angle (heading 0/360 = vertical/North)
-                const angleDeg = firstHeading - 90; // CSS rotation: 0 = right, so subtract 90
+                const angleDeg = firstHeading - 90;
                 const angleRad = (firstHeading * Math.PI) / 180;
 
                 const isActive = activeDirections.includes(rwy.name);
                 const parts = rwy.name.split('/');
 
-                // Offset each runway slightly to avoid overlap
-                const totalRunways = data!.all_runways.length;
-                const spreadOffset = totalRunways > 1 ? ((idx - (totalRunways - 1) / 2) * 20) : 0;
-                const perpAngle = angleRad + Math.PI / 2;
-                const offsetX = Math.cos(perpAngle) * spreadOffset;
-                const offsetY = Math.sin(perpAngle) * spreadOffset;
+                // Position based on real geographic offset
+                const cx = center + rwy.dxKm * scale;
+                const cy = center - rwy.dyKm * scale; // Y is inverted (screen vs geo)
 
-                // Runway line endpoints
+                // Label positions at each end of the runway
                 const halfLen = rwyLength / 2;
-                const x1 = center + offsetX - Math.cos(angleRad) * halfLen;
-                const y1 = center + offsetY - Math.sin(angleRad) * halfLen;
-                const x2 = center + offsetX + Math.cos(angleRad) * halfLen;
-                const y2 = center + offsetY + Math.sin(angleRad) * halfLen;
-
-                // Label positions at each end
-                const labelOffset = 14;
-                const lx1 = x1 - Math.cos(angleRad) * labelOffset;
-                const ly1 = y1 - Math.sin(angleRad) * labelOffset;
-                const lx2 = x2 + Math.cos(angleRad) * labelOffset;
-                const ly2 = y2 + Math.sin(angleRad) * labelOffset;
+                const labelOffset = 16;
+                const lx1 = cx - Math.cos(angleRad) * (halfLen + labelOffset);
+                const ly1 = cy - Math.sin(angleRad) * (halfLen + labelOffset);
+                const lx2 = cx + Math.cos(angleRad) * (halfLen + labelOffset);
+                const ly2 = cy + Math.sin(angleRad) * (halfLen + labelOffset);
 
                 return (
                   <React.Fragment key={rwy.name}>
@@ -297,8 +306,8 @@ export default function Index() {
                         styles.diagramRunway,
                         {
                           width: rwyLength,
-                          left: center + offsetX - rwyLength / 2,
-                          top: center + offsetY - 3,
+                          left: cx - rwyLength / 2,
+                          top: cy - 4,
                           transform: [{ rotate: `${angleDeg}deg` }],
                           backgroundColor: isActive ? '#4CAF50' : '#555',
                           borderColor: isActive ? '#66BB6A' : '#777',
@@ -311,8 +320,8 @@ export default function Index() {
                         styles.diagramCenterline,
                         {
                           width: rwyLength - 16,
-                          left: center + offsetX - (rwyLength - 16) / 2,
-                          top: center + offsetY - 0.5,
+                          left: cx - (rwyLength - 16) / 2,
+                          top: cy - 0.5,
                           transform: [{ rotate: `${angleDeg}deg` }],
                         },
                       ]}
