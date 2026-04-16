@@ -280,23 +280,30 @@ export default function Index() {
               {rwyPositions.map((rwy, idx) => {
                 const headingKeys = Object.keys(rwy.headings);
                 const firstHeading = rwy.headings[headingKeys[0]] || 0;
+                // CSS rotation: 0° points right. Aviation: 0° points up (north).
+                // So CSS rotation = heading - 90
                 const angleDeg = firstHeading - 90;
-                const angleRad = (firstHeading * Math.PI) / 180;
+                // Aviation heading to screen coords: x = sin(heading), y = -cos(heading)
+                const headingRad = (firstHeading * Math.PI) / 180;
+                const dirX = Math.sin(headingRad);  // East component
+                const dirY = -Math.cos(headingRad); // Screen Y (north = up = negative)
 
                 const isActive = activeDirections.includes(rwy.name);
                 const parts = rwy.name.split('/');
 
                 // Position based on real geographic offset
                 const cx = center + rwy.dxKm * scale;
-                const cy = center - rwy.dyKm * scale; // Y is inverted (screen vs geo)
+                const cy = center - rwy.dyKm * scale; // Y inverted (screen vs geo)
 
                 // Label positions at each end of the runway
                 const halfLen = rwyLength / 2;
-                const labelOffset = 16;
-                const lx1 = cx - Math.cos(angleRad) * (halfLen + labelOffset);
-                const ly1 = cy - Math.sin(angleRad) * (halfLen + labelOffset);
-                const lx2 = cx + Math.cos(angleRad) * (halfLen + labelOffset);
-                const ly2 = cy + Math.sin(angleRad) * (halfLen + labelOffset);
+                const labelOffset = halfLen + 16;
+                // End 1: opposite to heading direction (where parts[0] threshold is)
+                const lx1 = cx - dirX * labelOffset;
+                const ly1 = cy - dirY * labelOffset;
+                // End 2: in heading direction (where parts[1] threshold is)
+                const lx2 = cx + dirX * labelOffset;
+                const ly2 = cy + dirY * labelOffset;
 
                 return (
                   <React.Fragment key={rwy.name}>
@@ -326,7 +333,7 @@ export default function Index() {
                         },
                       ]}
                     />
-                    {/* Label end 1 */}
+                    {/* Label end 1 (threshold of parts[0]) */}
                     <Text
                       style={[
                         styles.diagramLabel,

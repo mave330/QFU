@@ -91,10 +91,10 @@ AIRPORT_DATABASE = {
         "lon": -118.4081,
         "elevation_ft": 128,
         "runways": [
-            {"name": "06L/24R", "heading_06": 69, "heading_24": 249, "lat": 33.9500, "lon": -118.4300},
-            {"name": "06R/24L", "heading_06": 69, "heading_24": 249, "lat": 33.9470, "lon": -118.4200},
-            {"name": "07L/25R", "heading_07": 79, "heading_25": 259, "lat": 33.9350, "lon": -118.4000},
-            {"name": "07R/25L", "heading_07": 79, "heading_25": 259, "lat": 33.9320, "lon": -118.3900},
+            {"name": "06L/24R", "heading_06": 70, "heading_24": 250, "lat": 33.9500, "lon": -118.4300},
+            {"name": "06R/24L", "heading_06": 70, "heading_24": 250, "lat": 33.9470, "lon": -118.4200},
+            {"name": "07L/25R", "heading_07": 70, "heading_25": 250, "lat": 33.9350, "lon": -118.4000},
+            {"name": "07R/25L", "heading_07": 70, "heading_25": 250, "lat": 33.9320, "lon": -118.3900},
         ]
     },
     # Frankfurt
