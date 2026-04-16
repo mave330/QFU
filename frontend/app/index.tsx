@@ -243,7 +243,6 @@ export default function Index() {
       {data!.all_runways && data!.all_runways.length > 0 && (() => {
         const diagramSize = Math.min(width - 64, 300);
         const center = diagramSize / 2;
-        const rwyLength = diagramSize * 0.55;
         const activeDirections = data!.active_runways.map(r => r.runway_name);
 
         // Calculate geographic bounds of all runways to scale positions
@@ -258,13 +257,26 @@ export default function Index() {
           dyKm: (rwy.lat - airportLat) * 111,
         }));
 
-        // Find max extent to scale
+        // Find max extent to determine scale
+        // We need runway endpoints + label space to fit in the diagram
         const maxExtent = Math.max(
           ...rwyPositions.map(r => Math.abs(r.dxKm)),
           ...rwyPositions.map(r => Math.abs(r.dyKm)),
-          0.5
+          0.3
         );
-        const scale = (diagramSize * 0.3) / maxExtent; // Scale so runways fit in ~60% of diagram
+
+        // Reserve space for runway length + labels on each side
+        // Available radius for positioning = diagramSize/2 - rwyHalfLen - labelSpace - padding
+        const padding = 30;
+        const labelSpace = 22;
+        const availableRadius = (diagramSize / 2) - padding - labelSpace;
+        // rwyLength will take up some visual space; scale geographic offset into availableRadius
+        // But the runway visual length should also scale with the diagram
+        const rwyLength = Math.min(diagramSize * 0.45, 160);
+        const rwyHalfVisual = rwyLength / 2;
+        // The position offset + runway half-length should fit within diagram/2 - padding
+        const maxPositionRadius = availableRadius - rwyHalfVisual;
+        const scale = maxPositionRadius / maxExtent;
 
         return (
           <View style={styles.section}>
